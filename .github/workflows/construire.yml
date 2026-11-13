@@ -1,0 +1,60 @@
+name: Construire les extensions (prototype)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "patch_extensions.py"
+      - "tools/package_xpi.py"
+      - ".github/workflows/construire.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  construire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Récupérer notre dépôt
+        uses: actions/checkout@v4
+
+      - name: Récupérer Read Aloud à une révision connue
+        shell: bash
+        run: |
+          git clone --depth 1 --branch firefox https://github.com/Read-Aloud/read-aloud.git sources/read-aloud
+          git -C sources/read-aloud fetch --depth 1 origin 8053a39541dc77e4ff7719348c406bad9792175a
+          git -C sources/read-aloud checkout --detach 8053a39541dc77e4ff7719348c406bad9792175a
+
+      - name: Récupérer TWP à une révision connue
+        shell: bash
+        run: |
+          git clone --depth 1 --branch master https://github.com/FilipePS/Traduzir-paginas-web.git sources/twp
+          git -C sources/twp fetch --depth 1 origin 50a92116542ab93524594cc210f4bf4e5d86a925
+          git -C sources/twp checkout --detach 50a92116542ab93524594cc210f4bf4e5d86a925
+
+      - name: Appliquer les modifications expérimentales
+        run: python3 patch_extensions.py sources/read-aloud sources/twp
+
+      - name: Vérifier la syntaxe du code modifié
+        shell: bash
+        run: |
+          python3 -m py_compile patch_extensions.py tools/package_xpi.py
+          node --check sources/read-aloud/js/popup.js
+          node --check sources/twp/src/contentScript/pageTranslator.js
+          node --check sources/twp/src/background/background.js
+
+      - name: Construire deux fichiers XPI non signés
+        shell: bash
+        run: |
+          python3 tools/package_xpi.py sources/read-aloud dist/read-aloud-traduire-ecouter.xpi
+          python3 tools/package_xpi.py sources/twp/src dist/twp-traduire-ecouter.xpi
+
+      - name: Mettre les archives à disposition
+        uses: actions/upload-artifact@v4
+        with:
+          name: extensions-experimentales-non-signees
+          path: dist/*.xpi
+          retention-days: 14
+          if-no-files-found: error
