@@ -1,4 +1,4 @@
-name: Construire les extensions (prototype)
+name: Construire et signer les extensions (prototype)
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ permissions:
 jobs:
   construire:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Récupérer notre dépôt
         uses: actions/checkout@v4
@@ -45,6 +45,27 @@ jobs:
           node --check sources/twp/src/contentScript/pageTranslator.js
           node --check sources/twp/src/background/background.js
 
+      - name: Numéroter cette version expérimentale
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          build = int(os.environ["RUN_NUMBER"])
+          assert 1 <= build <= 65535, "Numéro de build trop grand"
+          for path in (Path("sources/read-aloud/manifest.json"),
+                       Path("sources/twp/src/manifest.json")):
+              manifest = json.loads(path.read_text(encoding="utf-8"))
+              parts = manifest["version"].split(".")
+              parts = (parts + ["0", "0"])[:3]
+              assert all(part.isdigit() for part in parts)
+              manifest["version"] = ".".join([*parts, str(build)])
+              path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+              print(f"{path}: version {manifest['version']}")
+          PY
+
       - name: Construire deux fichiers XPI non signés
         shell: bash
         run: |
@@ -56,5 +77,56 @@ jobs:
         with:
           name: extensions-experimentales-non-signees
           path: dist/*.xpi
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Préparer la signature Mozilla
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Installer web-ext de Mozilla
+        run: npm install --global web-ext@10
+
+      - name: Signer Read Aloud expérimental via Mozilla (distribution privée)
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          WEB_EXT_NO_INPUT: 'true'
+        run: |
+          test -n "$WEB_EXT_API_KEY" && test -n "$WEB_EXT_API_SECRET" || { echo "::error::Secrets Mozilla manquants"; exit 1; }
+          mkdir -p dist/signed
+          web-ext sign --source-dir sources/read-aloud --artifacts-dir dist/signed --channel unlisted
+
+      - name: Signer TWP expérimental via Mozilla (distribution privée)
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          WEB_EXT_NO_INPUT: 'true'
+        run: |
+          test -n "$WEB_EXT_API_KEY" && test -n "$WEB_EXT_API_SECRET" || { echo "::error::Secrets Mozilla manquants"; exit 1; }
+          web-ext sign --source-dir sources/twp/src --artifacts-dir dist/signed --channel unlisted
+
+      - name: Vérifier que Mozilla a produit deux fichiers signés
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          files = sorted(Path('dist/signed').glob('*.xpi'))
+          assert len(files) == 2, f'Attendu 2 XPI signés, obtenu {len(files)}'
+          for xpi in files:
+              with ZipFile(xpi) as archive:
+                  assert "manifest.json" in archive.namelist(), xpi
+                  signed = [p for p in archive.namelist() if p.startswith("META-INF/")]
+                  assert signed, f"Signature manquante dans {xpi}"
+              print(f"Fichier signé reçu : {xpi.name} ({xpi.stat().st_size} octets)")
+          PY
+
+      - name: Télécharger les extensions signées depuis GitHub Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: extensions-experimentales-signees-mozilla
+          path: dist/signed/*.xpi
           retention-days: 14
           if-no-files-found: error
