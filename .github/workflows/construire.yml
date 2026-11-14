@@ -94,6 +94,9 @@ jobs:
           WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
           WEB_EXT_NO_INPUT: 'true'
         run: |
+          WEB_EXT_API_KEY="$(printf '%s' "$WEB_EXT_API_KEY" | tr -d '[:space:]')"
+          WEB_EXT_API_SECRET="$(printf '%s' "$WEB_EXT_API_SECRET" | tr -d '[:space:]')"
+          export WEB_EXT_API_KEY WEB_EXT_API_SECRET
           test -n "$WEB_EXT_API_KEY" && test -n "$WEB_EXT_API_SECRET" || { echo "::error::Secrets Mozilla manquants"; exit 1; }
           mkdir -p dist/signed
           web-ext sign --source-dir sources/read-aloud --artifacts-dir dist/signed --channel unlisted
@@ -104,6 +107,9 @@ jobs:
           WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
           WEB_EXT_NO_INPUT: 'true'
         run: |
+          WEB_EXT_API_KEY="$(printf '%s' "$WEB_EXT_API_KEY" | tr -d '[:space:]')"
+          WEB_EXT_API_SECRET="$(printf '%s' "$WEB_EXT_API_SECRET" | tr -d '[:space:]')"
+          export WEB_EXT_API_KEY WEB_EXT_API_SECRET
           test -n "$WEB_EXT_API_KEY" && test -n "$WEB_EXT_API_SECRET" || { echo "::error::Secrets Mozilla manquants"; exit 1; }
           web-ext sign --source-dir sources/twp/src --artifacts-dir dist/signed --channel unlisted
 
