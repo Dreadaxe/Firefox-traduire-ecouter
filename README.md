@@ -5,26 +5,26 @@ Prototype expérimental permettant, à terme, de **traduire intégralement l'ong
 ## Situation réelle
 
 - Les sources amont sont [TWP — Translate Web Pages](https://github.com/FilipePS/Traduzir-paginas-web) et [Read Aloud](https://github.com/Read-Aloud/read-aloud).
-- Ce dépôt contient **un script de modification** et un **workflow de construction GitHub Actions**. Il ne contient pas encore une extension validée sur Android.
-- Les fichiers issus de la compilation sont **non signés** : ils sont destinés à l'inspection et aux tests de développement, **pas à l'installation durable** dans Firefox Android standard.
+- Ce dépôt contient **un script de modification** et un **workflow de construction/signature GitHub Actions**. Il ne contient pas encore une extension validée sur Android.
+- Le workflow construit toujours deux **XPI non signés** pour les contrôles. Lorsque Mozilla autorise la signature, il produit également deux **XPI signés** destinés aux tests Android. La signature n'est pas une preuve de fonctionnement.
 - Le déclenchement par Tasker ou par le bouton central du Samsung viendra **après** validation dans Firefox.
 
 ## Construction sans ordinateur
 
-1. Dans GitHub, ouvrir **Actions** → **Construire les extensions**.
-2. Choisir **Run workflow**.
-3. Après l'exécution, télécharger l'artefact **extensions-experimentales-non-signees**.
-4. Il contient deux fichiers : `read-aloud-traduire-ecouter.xpi` et `twp-traduire-ecouter.xpi`.
+1. Dans GitHub, ouvrir **Actions** → **Construire et signer les extensions (prototype)**.
+2. Choisir **Run workflow**, ou consulter la dernière exécution déclenchée par un changement du code.
+3. Consulter le statut de l'étape de signature. Si elle est validée, télécharger l'artefact **extensions-experimentales-signees-mozilla** (deux XPI signés).
+4. L'artefact **extensions-experimentales-non-signees** reste disponible pour les diagnostics seulement.
 
 Ces archives sont produites à partir de deux révisions amont précises, pour éviter qu'une mise à jour imprévue ne casse le patch.
 
 ## Important : installation sur le téléphone
 
-Sur Firefox Android standard, les extensions personnalisées doivent être **signées par Mozilla** avant une installation durable. Les fichiers téléchargés des Actions **ne sont pas signés**.
+Sur Firefox Android standard, les extensions personnalisées doivent être **signées par Mozilla** avant une installation durable. **N'installer que des XPI issus de l'artefact signé** ; s'il n'existe pas, la signature a échoué et il faut examiner les logs.
 
 Les versions expérimentales possèdent des identifiants distincts et ne sont pas censées remplacer les extensions officielles. Il faut cependant vérifier leur comportement réel sur Firefox Android : coexistence, accès à l'onglet actif, communications entre extensions, lecture audio, et longues pages.
 
-Pour la signature non répertoriée, il faudra un compte Mozilla Add-ons et, pour l'automatiser, des identifiants API Mozilla. **Ne jamais publier de clés secrètes dans ce dépôt**. La signature n'est pas encore automatisée.
+Le workflow utilise les secrets GitHub `AMO_JWT_ISSUER` et `AMO_JWT_SECRET` lors de `web-ext sign --channel unlisted`. **Ne jamais publier de clés secrètes dans ce dépôt.** Si Mozilla refuse l'authentification, revérifier leurs valeurs dans les paramètres GitHub et sur le compte développeur Mozilla. Ne pas transmettre les valeurs dans une conversation.
 
 ## Fonctionnement technique visé
 
