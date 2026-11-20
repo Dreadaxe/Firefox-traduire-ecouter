@@ -210,6 +210,187 @@ chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => 
         'TWP content message handler')
     edits[page_path] = page
 
+
+    # Reader selection: TWP handles translation; user selects the playback engine.
+    ra_events_path = ra / 'js/events.js'
+    ra_events = ra_events_path.read_text(encoding='utf-8')
+    ra_events += '''
+// Experimental bridge: let the paired TWP add-on play its already-translated tab.
+brapi.runtime.onMessageExternal.addListener((request, sender) => {
+  if (sender.id !== "''' + TWP_ID + '''" || request?.action !== "dreadaxePlayTranslatedTab") return;
+  if (!Number.isInteger(request.tabId) || request.tabId < 0)
+    return Promise.resolve({ok: false, error: "Onglet invalide"});
+  return getActiveTab().then(tab => {
+    if (!tab || tab.id !== request.tabId) throw new Error("L'onglet actif a changé");
+    return playTab(tab.id);
+  }).then(() => ({ok: true}), error => ({ok: false, error: String(error?.message || error)}));
+});
+'''
+    edits[ra_events_path] = ra_events
+
+    twp_mobile_html_path = twp / 'src/contentScript/html/popupMobile.html'
+    mobile_html = twp_mobile_html_path.read_text(encoding='utf-8')
+    mobile_html = once(mobile_html,
+        '            <div data-value="more-options">',
+        '''            <div data-value="dreadaxe-listen-twp"><span>🔊 Lire la page avec TWP</span></div>
+            <div data-value="dreadaxe-listen-readaloud"><span>🎙 Lire avec Read Aloud (autres voix)</span></div>
+            <div data-value="dreadaxe-stop-twp"><span>⏹ Arrêter la lecture TWP</span></div>
+            <div data-value="more-options">''', 'TWP menu position')
+    edits[twp_mobile_html_path] = mobile_html
+
+    twp_mobile_js_path = twp / 'src/contentScript/popupMobile.js'
+    mobile_js = twp_mobile_js_path.read_text(encoding='utf-8')
+    mobile_helpers = '''
+  // Experimental reader choice, preserving the page and active tab.
+  function dreadaxeGetArticleText() {
+    const root = document.querySelector("article, [role='main'], main") || document.body;
+    if (!root) return "";
+    const copy = root.cloneNode(true);
+    copy.querySelectorAll(
+      "script, style, nav, footer, header, aside, form, button, " +
+      "iframe, noscript, [hidden], [aria-hidden='true'], .notranslate"
+    ).forEach(node => node.remove());
+    const selector = "h1,h2,h3,h4,p,li,pre,blockquote,figcaption";
+    const nodes = [...copy.querySelectorAll(selector)].filter(
+      node => !node.parentElement?.closest(selector)
+    );
+    const lines = nodes.map(node => (node.textContent || "").replace(/\\\\s+/g, " ").trim())
+      .filter(Boolean);
+    return (lines.length ? lines.join("\\\\n\\\\n") : copy.textContent || "").trim();
+  }
+
+  function dreadaxeSendCommand(action, extra = {}) {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({action, ...extra}, response => {
+        const error = chrome.runtime.lastError;
+        if (error) return reject(new Error(error.message));
+        if (!response?.ok) return reject(new Error(response?.error || "Commande sans réponse"));
+        resolve(response);
+      });
+    });
+  }
+
+  async function dreadaxeReadPage(backend) {
+    lastInteraction = Date.now();
+    const label = shadowRoot.getElementById("question");
+    label.textContent = "Préparation de la page…";
+    try {
+      const status = await pageTranslator.prepareForReading("fr");
+      if (!status?.ok) throw new Error(status?.error || "Traduction incomplète");
+      if (backend === "twp") {
+        const text = dreadaxeGetArticleText();
+        if (text.length < 10) throw new Error("Aucun texte lisible dans cette page");
+        if (text.length > 200000) throw new Error("Page trop longue pour ce prototype");
+        await dreadaxeSendCommand("dreadaxeReadWholePage", {text, targetLanguage: "fr"});
+      } else {
+        await dreadaxeSendCommand("dreadaxePlayWithReadAloud");
+      }
+      label.textContent = backend === "twp" ? "Lecture TWP lancée" : "Lecture Read Aloud lancée";
+      setTimeout(updateInterface, 2800);
+    } catch (error) {
+      console.error("Traduire et écouter", error);
+      label.textContent = "Échec de lecture : " + (error?.message || String(error));
+      showPopup();
+    }
+  }
+
+'''
+    mobile_js = once(mobile_js, '  // menu options\\n', mobile_helpers + '  // menu options\\n', 'TWP mobile code insertion')
+    mobile_js = once(mobile_js,
+        '    if (action === "choose-another-language") {',
+        '''    if (action === "dreadaxe-listen-twp" || action === "dreadaxe-listen-readaloud") {
+      closeMenu();
+      void dreadaxeReadPage(action === "dreadaxe-listen-twp" ? "twp" : "readaloud");
+      return;
+    } else if (action === "dreadaxe-stop-twp") {
+      chrome.runtime.sendMessage({action: "stopAudio"}, checkedLastError);
+      closeMenu();
+      return;
+    } else if (action === "choose-another-language") {''',
+        'TWP listener integration')
+    edits[twp_mobile_js_path] = mobile_js
+
+    # Share the already-implemented full-document translation synchronization.
+    page = edits[page_path]
+    page = once(page,
+        '  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {',
+        '  pageTranslator.prepareForReading = readAloudTranslateAndWait;\\n'
+        '  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {',
+        'TWP expose page preparation')
+    edits[page_path] = page
+
+    # TWP audio pipeline already handles short text. Stream full pages in modest
+    # batches rather than prefetching hundreds of speech segments at once.
+    twp_tts_path = twp / 'src/background/textToSpeech.js'
+    tts = twp_tts_path.read_text(encoding='utf-8')
+    tts += '''
+// Experimental long-article playback. Pause/resume and Android media
+// notifications remain future work; stopAudio cancels future batches.
+let dreadaxeSpeechGeneration = 0;
+function dreadaxeSplitSpeech(text) {
+  const chunks = [];
+  let part = "";
+  for (const word of text.split(/\\\\s+/).filter(Boolean)) {
+    if (part && part.length + word.length + 1 > 1100) {
+      chunks.push(part);
+      part = "";
+    }
+    if (word.length > 1100) {
+      if (part) { chunks.push(part); part = ""; }
+      for (let i = 0; i < word.length; i += 1100) chunks.push(word.slice(i, i + 1100));
+    } else {
+      part += (part ? " " : "") + word;
+    }
+  }
+  if (part) chunks.push(part);
+  return chunks;
+}
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request?.action === "dreadaxeReadWholePage") {
+    const text = typeof request.text === "string" ? request.text.trim() : "";
+    if (!sender.tab || text.length < 10 || text.length > 200000) {
+      sendResponse({ok: false, error: "Texte invalide ou page trop longue"});
+      return;
+    }
+    const generation = ++dreadaxeSpeechGeneration;
+    googleService.stopAll();
+    bingService.stopAll();
+    const service = twpConfig.get("textToSpeechService") === "bing" ? bingService : googleService;
+    (async () => {
+      for (const chunk of dreadaxeSplitSpeech(text)) {
+        if (generation !== dreadaxeSpeechGeneration) break;
+        await service.textToSpeech(chunk, request.targetLanguage || "fr");
+      }
+    })().catch(error => console.error("Dreadaxe lecture complète", error));
+    sendResponse({ok: true});
+  } else if (request?.action === "stopAudio") {
+    dreadaxeSpeechGeneration++;
+  }
+});
+'''
+    edits[twp_tts_path] = tts
+
+    # The content script asks TWP background to contact the dedicated reader.
+    bg = edits[bg_path]
+    bg += '''
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request?.action !== "dreadaxePlayWithReadAloud") return;
+  if (!sender.tab || !Number.isInteger(sender.tab.id)) {
+    sendResponse({ok: false, error: "Onglet source inconnu"});
+    return;
+  }
+  chrome.runtime.sendMessage("''' + RA_ID + '''",
+    {action: "dreadaxePlayTranslatedTab", tabId: sender.tab.id},
+    response => {
+      const error = chrome.runtime.lastError;
+      sendResponse(error ? {ok: false, error: error.message} :
+        (response || {ok: false, error: "Read Aloud expérimental indisponible"}));
+    });
+  return true;
+});
+'''
+    edits[bg_path] = bg
+
     for path, content in edits.items():
         path.write_text(content, encoding='utf-8')
         print('patched', path)
