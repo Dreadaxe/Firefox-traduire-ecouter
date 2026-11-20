@@ -234,6 +234,8 @@ brapi.runtime.onMessageExternal.addListener((request, sender) => {
         '            <div data-value="more-options">',
         '''            <div data-value="dreadaxe-listen-twp"><span>🔊 Lire la page avec TWP</span></div>
             <div data-value="dreadaxe-listen-readaloud"><span>🎙 Lire avec Read Aloud (autres voix)</span></div>
+            <div data-value="dreadaxe-pause-twp"><span>⏸ Pause TWP</span></div>
+            <div data-value="dreadaxe-resume-twp"><span>▶ Reprendre TWP</span></div>
             <div data-value="dreadaxe-stop-twp"><span>⏹ Arrêter la lecture TWP</span></div>
             <div data-value="more-options">''', 'TWP menu position')
     edits[twp_mobile_html_path] = mobile_html
@@ -283,6 +285,8 @@ brapi.runtime.onMessageExternal.addListener((request, sender) => {
         if (text.length > 200000) throw new Error("Page trop longue pour ce prototype");
         await dreadaxeSendCommand("dreadaxeReadWholePage", {text, targetLanguage: "fr"});
       } else {
+        // Avoid TWP and Read Aloud talking over each other.
+        await dreadaxeSendCommand("dreadaxeStopWholePage");
         await dreadaxeSendCommand("dreadaxePlayWithReadAloud");
       }
       label.textContent = backend === "twp" ? "Lecture TWP lancée" : "Lecture Read Aloud lancée";
@@ -302,8 +306,16 @@ brapi.runtime.onMessageExternal.addListener((request, sender) => {
       closeMenu();
       void dreadaxeReadPage(action === "dreadaxe-listen-twp" ? "twp" : "readaloud");
       return;
-    } else if (action === "dreadaxe-stop-twp") {
-      chrome.runtime.sendMessage({action: "stopAudio"}, checkedLastError);
+    } else if (action === "dreadaxe-pause-twp" || action === "dreadaxe-resume-twp" ||
+               action === "dreadaxe-stop-twp") {
+      const command = action === "dreadaxe-pause-twp" ? "dreadaxePauseWholePage" :
+                      action === "dreadaxe-resume-twp" ? "dreadaxeResumeWholePage" :
+                      "dreadaxeStopWholePage";
+      void dreadaxeSendCommand(command).catch(error => {
+        console.error("Commande TWP", error);
+        shadowRoot.getElementById("question").textContent = String(error.message || error);
+        showPopup();
+      });
       closeMenu();
       return;
     } else if (action === "choose-another-language") {''',
@@ -325,8 +337,34 @@ brapi.runtime.onMessageExternal.addListener((request, sender) => {
     tts = twp_tts_path.read_text(encoding='utf-8')
     tts = once(tts, '  // Listen for messages coming from contentScript or other scripts.', '''
 // Experimental long-article playback. Pause/resume and Android media
-// notifications remain future work; stopAudio cancels future batches.
+// Notification controls are best-effort: Firefox Android may not expose MediaSession.
 let dreadaxeSpeechGeneration = 0;
+let dreadaxeActiveService = null;
+let dreadaxeSpeechPaused = false;
+function dreadaxePause() {
+  dreadaxeSpeechPaused = true;
+  dreadaxeActiveService?.pauseCurrent();
+}
+function dreadaxeResume() {
+  dreadaxeSpeechPaused = false;
+  dreadaxeActiveService?.resumeCurrent();
+}
+function dreadaxeStop() {
+  dreadaxeSpeechGeneration++;
+  dreadaxeSpeechPaused = false;
+  googleService.stopAll();
+  bingService.stopAll();
+  dreadaxeActiveService = null;
+}
+try {
+  if (typeof navigator !== "undefined" && navigator.mediaSession) {
+    navigator.mediaSession.setActionHandler("play", dreadaxeResume);
+    navigator.mediaSession.setActionHandler("pause", dreadaxePause);
+    navigator.mediaSession.setActionHandler("stop", dreadaxeStop);
+  }
+} catch (error) {
+  console.debug("MediaSession not available for extension audio", error);
+}
 function dreadaxeSplitSpeech(text) {
   const chunks = [];
   let part = "";
@@ -355,7 +393,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const generation = ++dreadaxeSpeechGeneration;
     googleService.stopAll();
     bingService.stopAll();
+    dreadaxeSpeechPaused = false;
     const service = twpConfig.get("textToSpeechService") === "bing" ? bingService : googleService;
+    dreadaxeActiveService = service;
     (async () => {
       for (const chunk of dreadaxeSplitSpeech(text)) {
         if (generation !== dreadaxeSpeechGeneration) break;
@@ -363,11 +403,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     })().catch(error => console.error("Dreadaxe lecture complète", error));
     sendResponse({ok: true});
+  } else if (request?.action === "dreadaxePauseWholePage") {
+    dreadaxePause();
+    sendResponse({ok: true});
+  } else if (request?.action === "dreadaxeResumeWholePage") {
+    dreadaxeResume();
+    sendResponse({ok: true});
+  } else if (request?.action === "dreadaxeStopWholePage") {
+    dreadaxeStop();
+    sendResponse({ok: true});
   } else if (request?.action === "stopAudio") {
-    dreadaxeSpeechGeneration++;
+    dreadaxeStop();
   }
 });
 ''' + '  // Listen for messages coming from contentScript or other scripts.', 'TWP speech insertion')
+    # Keep pause/resume limited to the active audio element, not the whole cache.
+    tts = once(tts,
+        '              const audio = audios[currentIndex];',
+        '              const audio = audios[currentIndex];\\n              this.currentAudio = audio || null;',
+        'Track current audio in playlist')
+    tts = once(tts,
+        '          } else if (audios instanceof HTMLAudioElement) {',
+        '          } else if (audios instanceof HTMLAudioElement) {\\n            this.currentAudio = audios;',
+        'Track single audio')
+    tts = once(tts,
+        '    stopAll() {\\n      this.audios.forEach((audio) => {',
+        '''    pauseCurrent() {
+      if (this.currentAudio && !this.currentAudio.paused) this.currentAudio.pause();
+    }
+    resumeCurrent() {
+      if (this.currentAudio && this.currentAudio.paused) {
+        void this.audioAmplifier.amplify(this.currentAudio)
+          .then(() => this.currentAudio?.play())
+          .catch(error => console.warn("Reprise audio impossible", error));
+      }
+    }
+    stopAll() {
+      this.currentAudio = null;
+      this.audios.forEach((audio) => {''',
+        'TWP audio pause and resume')
     edits[twp_tts_path] = tts
 
     # The content script asks TWP background to contact the dedicated reader.
