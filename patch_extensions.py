@@ -30,7 +30,7 @@ def patch(ra, twp):
     if ra_manifest['browser_specific_settings']['gecko']['id'] != '{ddc62400-f22d-4dd3-8b4a-05837de53c2e}':
         raise RuntimeError('Unexpected upstream Read Aloud ID')
     ra_manifest['browser_specific_settings']['gecko']['id'] = RA_ID
-    ra_manifest['name'] = 'Read Aloud — Traduire et écouter (test)'
+    ra_manifest['name'] = '🧪 TEST Dreadaxe — Read Aloud'
     edits[ra_manifest_path] = json.dumps(ra_manifest, indent=2, ensure_ascii=False) + '\n'
 
     twp_manifest_path = twp / 'src/manifest.json'
@@ -38,7 +38,7 @@ def patch(ra, twp):
     if twp_manifest['browser_specific_settings']['gecko']['id'] != '{036a55b4-5e72-4d05-a06c-cba2dfcc134a}':
         raise RuntimeError('Unexpected upstream TWP ID')
     twp_manifest['browser_specific_settings']['gecko']['id'] = TWP_ID
-    twp_manifest['name'] = 'TWP — Traduire et écouter (test)'
+    twp_manifest['name'] = '🧪 TEST Dreadaxe — TWP'
     edits[twp_manifest_path] = json.dumps(twp_manifest, indent=2, ensure_ascii=False) + '\n'
 
     popup_path = ra / 'popup.html'
