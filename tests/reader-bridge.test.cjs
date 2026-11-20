@@ -118,3 +118,55 @@ test('TWP transmet l’onglet d’origine sans changer d’onglet', async () => 
   const invalid=await new Promise(resolve=>handler({action:'dreadaxePlayWithReadAloud'},{},resolve));
   assert.equal(invalid.ok,false);
 });
+
+test('Contrôles lecture/pause/reprise/arrêt et MediaSession optionnelle', async () => {
+  const block = getBetween(TTS, '// Experimental long-article playback.', '  // Listen for messages coming from contentScript or other scripts.');
+  let listener, mediaHandlers={}, sent=[], paused=0, resumed=0, stopped=0;
+  let releaseAudio=()=>{};
+  const googleService={
+    stopAll(){stopped++},
+    pauseCurrent(){paused++},
+    resumeCurrent(){resumed++},
+    textToSpeech(text){
+      sent.push(text);
+      return new Promise(resolve=>{releaseAudio=resolve});
+    }
+  };
+  const bingService={
+    stopAll(){},
+    pauseCurrent(){},
+    resumeCurrent(){},
+    textToSpeech: async ()=>{}
+  };
+  const chrome={runtime:{onMessage:{addListener:fn=>{listener=fn}}}};
+  vm.runInNewContext(block,{
+    chrome, googleService,bingService,console,Promise,
+    navigator:{mediaSession:{setActionHandler:(name,fn)=>{mediaHandlers[name]=fn}}},
+    twpConfig:{get:()=> 'google'}
+  });
+  assert.deepEqual(Object.keys(mediaHandlers).sort(),['pause','play','stop']);
+  const longText=('Longue phrase de test et encore un mot. ').repeat(130);
+  let reply=null;
+  listener({action:'dreadaxeReadWholePage',text:longText,targetLanguage:'fr'},
+    {tab:{id:5}},res=>{reply=res});
+  assert.equal(reply.ok,true);
+  assert.equal(sent.length,1,'premier lot seulement');
+  mediaHandlers.pause();
+  assert.equal(paused,1);
+  mediaHandlers.play();
+  assert.equal(resumed,1);
+  let stoppedResponse;
+  listener({action:'dreadaxeStopWholePage'},{tab:{id:5}},res=>{stoppedResponse=res});
+  assert.equal(stoppedResponse.ok,true);
+  assert.ok(stopped >= 3);
+  releaseAudio();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(sent.length,1,'un arrêt ne doit pas lancer les lots suivants');
+});
+
+test('Menu mobile : sélection explicite de deux lecteurs et contrôles',()=>{
+  const html=fs.readFileSync('sources/twp/src/contentScript/html/popupMobile.html','utf8');
+  for (const key of ['dreadaxe-listen-twp','dreadaxe-listen-readaloud','dreadaxe-pause-twp','dreadaxe-resume-twp','dreadaxe-stop-twp']) {
+    assert.ok(html.includes('data-value="'+key+'"'), 'Commande absente du menu : '+key);
+  }
+});
