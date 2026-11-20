@@ -420,14 +420,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     # Keep pause/resume limited to the active audio element, not the whole cache.
     tts = once(tts,
         '              const audio = audios[currentIndex];',
-        '              const audio = audios[currentIndex];\\n              this.currentAudio = audio || null;',
+        '              const audio = audios[currentIndex];\n              this.currentAudio = audio || null;',
         'Track current audio in playlist')
     tts = once(tts,
         '          } else if (audios instanceof HTMLAudioElement) {',
-        '          } else if (audios instanceof HTMLAudioElement) {\\n            this.currentAudio = audios;',
+        '          } else if (audios instanceof HTMLAudioElement) {\n            this.currentAudio = audios;',
         'Track single audio')
     tts = once(tts,
-        '    stopAll() {\\n      this.audios.forEach((audio) => {',
+        '    stopAll() {\n      this.audios.forEach((audio) => {',
         '''    pauseCurrent() {
       if (this.currentAudio && !this.currentAudio.paused) this.currentAudio.pause();
     }
