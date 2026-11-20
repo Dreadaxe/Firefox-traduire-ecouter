@@ -60,6 +60,10 @@ def main():
     url = f"{BASE}/{path}/versions/?filter=all_with_unlisted&page_size=50"
     response = json.loads(fetch(url))
     versions = response.get("results", [])
+    print(f"Mozilla returned {len(versions)} Read Aloud versions")
+    for version in versions[:10]:
+        print("Version:", version.get("version"), "reviewed:", bool(version.get("reviewed")),
+              "files:", [(f.get("status"), bool(f.get("url")), f.get("is_mozilla_signed_extension")) for f in version.get("files", [])])
     found = []
     for version in versions:
         for file in version.get("files", []):
