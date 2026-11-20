@@ -1,0 +1,34 @@
+name: Recuperer Read Aloud signe par Mozilla
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "tools/recuperer_readaloud_signe.py"
+      - ".github/workflows/recuperer-readaloud.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  recuperer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Recuperer le XPI deja approuve depuis Mozilla
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: python3 tools/recuperer_readaloud_signe.py
+
+      - name: Publier Read Aloud signe
+        uses: actions/upload-artifact@v4
+        with:
+          name: read-aloud-experimental-signe-mozilla
+          path: dist/read-aloud-traduire-ecouter-signe-mozilla.xpi
+          retention-days: 30
+          if-no-files-found: error
