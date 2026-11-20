@@ -254,9 +254,9 @@ brapi.runtime.onMessageExternal.addListener((request, sender) => {
     const nodes = [...copy.querySelectorAll(selector)].filter(
       node => !node.parentElement?.closest(selector)
     );
-    const lines = nodes.map(node => (node.textContent || "").replace(/\\\\s+/g, " ").trim())
+    const lines = nodes.map(node => (node.textContent || "").replace(/\\s+/g, " ").trim())
       .filter(Boolean);
-    return (lines.length ? lines.join("\\\\n\\\\n") : copy.textContent || "").trim();
+    return (lines.length ? lines.join("\\n\\n") : copy.textContent || "").trim();
   }
 
   function dreadaxeSendCommand(action, extra = {}) {
@@ -295,7 +295,7 @@ brapi.runtime.onMessageExternal.addListener((request, sender) => {
   }
 
 '''
-    mobile_js = once(mobile_js, '  // menu options\\n', mobile_helpers + '  // menu options\\n', 'TWP mobile code insertion')
+    mobile_js = once(mobile_js, '  // menu options\n', mobile_helpers + '  // menu options\n', 'TWP mobile code insertion')
     mobile_js = once(mobile_js,
         '    if (action === "choose-another-language") {',
         '''    if (action === "dreadaxe-listen-twp" || action === "dreadaxe-listen-readaloud") {
@@ -314,7 +314,7 @@ brapi.runtime.onMessageExternal.addListener((request, sender) => {
     page = edits[page_path]
     page = once(page,
         '  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {',
-        '  pageTranslator.prepareForReading = readAloudTranslateAndWait;\\n'
+        '  pageTranslator.prepareForReading = readAloudTranslateAndWait;\n'
         '  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {',
         'TWP expose page preparation')
     edits[page_path] = page
@@ -323,14 +323,14 @@ brapi.runtime.onMessageExternal.addListener((request, sender) => {
     # batches rather than prefetching hundreds of speech segments at once.
     twp_tts_path = twp / 'src/background/textToSpeech.js'
     tts = twp_tts_path.read_text(encoding='utf-8')
-    tts += '''
+    tts = once(tts, '  // Listen for messages coming from contentScript or other scripts.', '''
 // Experimental long-article playback. Pause/resume and Android media
 // notifications remain future work; stopAudio cancels future batches.
 let dreadaxeSpeechGeneration = 0;
 function dreadaxeSplitSpeech(text) {
   const chunks = [];
   let part = "";
-  for (const word of text.split(/\\\\s+/).filter(Boolean)) {
+  for (const word of text.split(/\\s+/).filter(Boolean)) {
     if (part && part.length + word.length + 1 > 1100) {
       chunks.push(part);
       part = "";
@@ -367,7 +367,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     dreadaxeSpeechGeneration++;
   }
 });
-'''
+''' + '  // Listen for messages coming from contentScript or other scripts.', 'TWP speech insertion')
     edits[twp_tts_path] = tts
 
     # The content script asks TWP background to contact the dedicated reader.
