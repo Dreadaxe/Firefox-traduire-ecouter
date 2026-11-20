@@ -158,7 +158,7 @@ test('Contrôles lecture/pause/reprise/arrêt et MediaSession optionnelle', asyn
   let stoppedResponse;
   listener({action:'dreadaxeStopWholePage'},{tab:{id:5}},res=>{stoppedResponse=res});
   assert.equal(stoppedResponse.ok,true);
-  assert.ok(stopped >= 3);
+  assert.ok(stopped >= 2, 'lancement puis arrêt doivent interrompre la voix Google');
   releaseAudio();
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(sent.length,1,'un arrêt ne doit pas lancer les lots suivants');
