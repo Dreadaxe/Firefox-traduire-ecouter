@@ -1,0 +1,84 @@
+name: Soumettre TWP experimental a Mozilla
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/signer-twp.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  soumettre-twp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Recuperer notre depot
+        uses: actions/checkout@v4
+
+      - name: Recuperer les versions sources connues
+        shell: bash
+        run: |
+          git clone --depth 1 --branch firefox https://github.com/Read-Aloud/read-aloud.git sources/read-aloud
+          git -C sources/read-aloud fetch --depth 1 origin 8053a39541dc77e4ff7719348c406bad9792175a
+          git -C sources/read-aloud checkout --detach 8053a39541dc77e4ff7719348c406bad9792175a
+          git clone --depth 1 --branch master https://github.com/FilipePS/Traduzir-paginas-web.git sources/twp
+          git -C sources/twp fetch --depth 1 origin 50a92116542ab93524594cc210f4bf4e5d86a925
+          git -C sources/twp checkout --detach 50a92116542ab93524594cc210f4bf4e5d86a925
+
+      - name: Appliquer le patch de liaison
+        run: python3 patch_extensions.py sources/read-aloud sources/twp
+
+      - name: Numero de version de TWP experimental
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          p = Path("sources/twp/src/manifest.json")
+          manifest = json.loads(p.read_text(encoding="utf-8"))
+          parts = (manifest["version"].split(".") + ["0", "0"])[:3]
+          manifest["version"] = ".".join([*parts, str(int(os.environ["RUN_NUMBER"]))])
+          p.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          print("TWP experimental:", manifest["version"])
+          PY
+
+      - name: Verifier les sources modifiees
+        run: |
+          node --check sources/twp/src/contentScript/pageTranslator.js
+          node --check sources/twp/src/background/background.js
+          python3 tools/package_xpi.py sources/twp/src dist/twp-experimental-non-signe.xpi
+
+      - name: Preparer Mozilla web-ext
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Installer web-ext
+        run: npm install --global web-ext@10
+
+      - name: Soumettre TWP experimental pour signature privee
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          WEB_EXT_NO_INPUT: 'true'
+        shell: bash
+        run: |
+          WEB_EXT_API_KEY="$(printf '%s' "$WEB_EXT_API_KEY" | tr -d '[:space:]')"
+          WEB_EXT_API_SECRET="$(printf '%s' "$WEB_EXT_API_SECRET" | tr -d '[:space:]')"
+          export WEB_EXT_API_KEY WEB_EXT_API_SECRET
+          test -n "$WEB_EXT_API_KEY" && test -n "$WEB_EXT_API_SECRET" || { echo "::error::Secrets Mozilla manquants"; exit 1; }
+          mkdir -p dist/signed
+          web-ext sign --source-dir sources/twp/src --artifacts-dir dist/signed --channel unlisted
+
+      - name: Publier TWP signe si Mozilla a deja approuve
+        uses: actions/upload-artifact@v4
+        with:
+          name: twp-experimental-signe-mozilla
+          path: dist/signed/*.xpi
+          retention-days: 14
+          if-no-files-found: error
