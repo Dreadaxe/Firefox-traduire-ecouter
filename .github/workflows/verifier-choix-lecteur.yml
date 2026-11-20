@@ -1,0 +1,62 @@
+name: Verifier prototype choix de lecteur
+
+on:
+  push:
+    branches: [prototype-choix-lecteur]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Recuperer Read Aloud
+        run: |
+          git clone --depth 1 --branch firefox https://github.com/Read-Aloud/read-aloud.git sources/read-aloud
+          git -C sources/read-aloud fetch --depth 1 origin 8053a39541dc77e4ff7719348c406bad9792175a
+          git -C sources/read-aloud checkout --detach 8053a39541dc77e4ff7719348c406bad9792175a
+      - name: Recuperer TWP
+        run: |
+          git clone --depth 1 --branch master https://github.com/FilipePS/Traduzir-paginas-web.git sources/twp
+          git -C sources/twp fetch --depth 1 origin 50a92116542ab93524594cc210f4bf4e5d86a925
+          git -C sources/twp checkout --detach 50a92116542ab93524594cc210f4bf4e5d86a925
+      - name: Appliquer le patch experimental
+        run: python3 patch_extensions.py sources/read-aloud sources/twp
+      - name: Verifier syntaxe JavaScript et Python
+        run: |
+          python3 -m py_compile patch_extensions.py tools/package_xpi.py
+          node --check sources/read-aloud/js/events.js
+          node --check sources/read-aloud/js/popup.js
+          node --check sources/twp/src/contentScript/popupMobile.js
+          node --check sources/twp/src/contentScript/pageTranslator.js
+          node --check sources/twp/src/background/background.js
+          node --check sources/twp/src/background/textToSpeech.js
+      - name: Valider la presence des deux commandes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          html = Path("sources/twp/src/contentScript/html/popupMobile.html").read_text()
+          assert 'data-value="dreadaxe-listen-twp"' in html
+          assert 'data-value="dreadaxe-listen-readaloud"' in html
+          assert "dreadaxe-stop-twp" in html
+          popup = Path("sources/twp/src/contentScript/popupMobile.js").read_text()
+          assert "pageTranslator.prepareForReading" in popup
+          ra = Path("sources/read-aloud/js/events.js").read_text()
+          assert "onMessageExternal" in ra
+          print("Controls and inter-extension bridge found")
+          PY
+      - name: Construire XPI non signes pour revue
+        run: |
+          python3 tools/package_xpi.py sources/read-aloud dist/read-aloud-choix-lecteur-NON-SIGNE.xpi
+          python3 tools/package_xpi.py sources/twp/src dist/twp-choix-lecteur-NON-SIGNE.xpi
+      - name: Publier les archives de test
+        uses: actions/upload-artifact@v4
+        with:
+          name: prototype-choix-lecteur-non-signe
+          path: dist/*.xpi
+          retention-days: 7
+          if-no-files-found: error
