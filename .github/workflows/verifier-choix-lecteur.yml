@@ -35,6 +35,10 @@ jobs:
           node --check sources/twp/src/contentScript/pageTranslator.js
           node --check sources/twp/src/background/background.js
           node --check sources/twp/src/background/textToSpeech.js
+      - name: Tester les longs articles et le pont interextensions
+        run: |
+          npm install --no-save --no-audit --no-fund jsdom@26
+          node --test tests/reader-bridge.test.cjs
       - name: Valider la presence des deux commandes
         run: |
           python3 - <<'PY'
