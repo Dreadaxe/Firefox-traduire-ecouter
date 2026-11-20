@@ -1,0 +1,113 @@
+name: Signer prototype mobile TWP et Read Aloud
+
+on:
+  push:
+    branches: [prototype-choix-lecteur]
+    paths:
+      - ".github/workflows/signer-prototype-mobile.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  signer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        extension: [twp, read-aloud]
+    steps:
+      - name: Recuperer les fichiers du projet
+        uses: actions/checkout@v4
+
+      - name: Recuperer les deux extensions aux versions epinglees
+        shell: bash
+        run: |
+          git clone --depth 1 --branch firefox https://github.com/Read-Aloud/read-aloud.git sources/read-aloud
+          git -C sources/read-aloud fetch --depth 1 origin 8053a39541dc77e4ff7719348c406bad9792175a
+          git -C sources/read-aloud checkout --detach 8053a39541dc77e4ff7719348c406bad9792175a
+          git clone --depth 1 --branch master https://github.com/FilipePS/Traduzir-paginas-web.git sources/twp
+          git -C sources/twp fetch --depth 1 origin 50a92116542ab93524594cc210f4bf4e5d86a925
+          git -C sources/twp checkout --detach 50a92116542ab93524594cc210f4bf4e5d86a925
+
+      - name: Appliquer le patch du choix de lecteur
+        run: python3 patch_extensions.py sources/read-aloud sources/twp
+
+      - name: Preparer la version Mozilla uniquement pour l'extension a signer
+        env:
+          EXTENSION: ${{ matrix.extension }}
+          RUN_NUMBER: ${{ github.run_number }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path("sources/read-aloud/manifest.json") if os.environ["EXTENSION"] == "read-aloud" else Path("sources/twp/src/manifest.json")
+          manifest = json.loads(path.read_text(encoding="utf-8"))
+          version = manifest["version"].split(".")
+          version = (version + ["0", "0"])[:3]
+          patch = 2026 + int(os.environ["RUN_NUMBER"])
+          assert 0 < patch < 65536
+          manifest["version"] = ".".join([*version, str(patch)])
+          path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
+          print(os.environ["EXTENSION"], "version de test:", manifest["version"])
+          PY
+
+      - name: Controler les sources modifiees
+        run: |
+          node --check sources/read-aloud/js/popup.js
+          node --check sources/read-aloud/js/events.js
+          node --check sources/twp/src/background/background.js
+          node --check sources/twp/src/background/textToSpeech.js
+          node --check sources/twp/src/contentScript/pageTranslator.js
+          node --check sources/twp/src/contentScript/popupMobile.js
+
+      - name: Preparer la signature Mozilla
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Installer Mozilla web-ext
+        run: npm install --global web-ext@10
+
+      - name: Signer l'extension via Mozilla (distribution privee)
+        env:
+          EXTENSION: ${{ matrix.extension }}
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          WEB_EXT_NO_INPUT: 'true'
+        shell: bash
+        run: |
+          WEB_EXT_API_KEY="$(printf '%s' "$WEB_EXT_API_KEY" | tr -d '[:space:]')"
+          WEB_EXT_API_SECRET="$(printf '%s' "$WEB_EXT_API_SECRET" | tr -d '[:space:]')"
+          export WEB_EXT_API_KEY WEB_EXT_API_SECRET
+          test -n "$WEB_EXT_API_KEY" && test -n "$WEB_EXT_API_SECRET" || { echo "::error::Secrets API Mozilla absents"; exit 1; }
+          mkdir -p dist/signed
+          if [ "$EXTENSION" = "twp" ]; then
+            SOURCE="sources/twp/src"
+          else
+            SOURCE="sources/read-aloud"
+          fi
+          web-ext sign --source-dir "$SOURCE" --artifacts-dir dist/signed --channel unlisted
+
+      - name: Confirmer la presence d'un XPI signe
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          files = list(Path("dist/signed").glob("*.xpi"))
+          assert len(files) == 1, f"Un XPI signe attendu, obtenu {len(files)}"
+          with ZipFile(files[0]) as archive:
+              assert any(x.startswith("META-INF/") for x in archive.namelist())
+          print("Signed:", files[0].name)
+          PY
+
+      - name: Publier le fichier signe pour Firefox Android
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.extension }}-choix-lecteur-SIGNE-MOZILLA
+          path: dist/signed/*.xpi
+          retention-days: 30
+          if-no-files-found: error
