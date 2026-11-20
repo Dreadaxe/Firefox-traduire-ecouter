@@ -48,6 +48,23 @@ Le workflow [Soumettre TWP experimental a Mozilla](https://github.com/Dreadaxe/F
 
 Si Mozilla approuve avant la limite d'attente de l'outil, un artefact `twp-experimental-signe-mozilla` est publié. Sinon, le journal peut afficher un lien vers la page développeur où récupérer le XPI **une fois approuvé**. Un échec pour délai dépassé ne signifie pas à lui seul un refus de Mozilla. Éviter de relancer plusieurs soumissions sans vérifier le statut de la version existante.
 
+## Identifier facilement les versions de test
+
+Le patch ajoute ces noms, visibles au début de la liste des extensions Firefox :
+
+- **🧪 TEST Dreadaxe — Read Aloud**
+- **🧪 TEST Dreadaxe — TWP**
+
+Le nom, ainsi que l'identifiant Mozilla propre à chaque extension, permet de conserver les versions officielles à côté. **Une version déjà signée ne peut pas être renommée** : une nouvelle version signée est nécessaire. Les modifications de code ne déclenchent plus automatiquement de soumission Mozilla ; seule une action volontaire du workflow peut signer.
+
+## Audit des fonctions de lecture de TWP
+
+L'extension TWP possède déjà des boutons **Écouter** dans ses interfaces de traduction d'un passage sélectionné ou survolé (fichiers sources `src/contentScript/translateSelected.js`, `src/contentScript/showTranslated.js`, `src/popup/popup-translate-text.js`). Ces interfaces transmettent une chaîne de texte au moteur interne de synthèse vocale (Google ou Bing).
+
+Dans `src/background/textToSpeech.js`, la fonction `textToSpeech(fullText, targetLanguage)` sait recevoir du texte long, le découper en **segments inférieurs à 170 caractères** (`getRequests`) et lire les segments les uns à la suite des autres. C'est donc **une capacité de lecture de texte long**, mais **pas encore une commande de lecture de toute la page HTML** : aucune des interfaces inspectées ne rassemble automatiquement tout l'article et ne le confie au moteur. L'adaptation pour lire la page entière depuis TWP seul est plausible et mérite un prototype séparé.
+
+**Risques à tester** : longues pages et nombreuses requêtes audio concurrentes, limites des services Google/Bing, extraction de l'article plutôt que du texte des menus, vitesse/qualité des voix, lecture en arrière-plan et commandes Android. La qualité de lecture de TWP n'a pas été validée sur le téléphone.
+
 ## Validation nécessaire
 
 Avant toute proposition d'installation, vérifier que l'action GitHub réussit, que les extensions démarrent ensemble, puis que les longues pages sont réellement lues **en français et intégralement** sur le Samsung Galaxy S10e. Les tests automatisés de syntaxe ne garantissent pas ce fonctionnement.
