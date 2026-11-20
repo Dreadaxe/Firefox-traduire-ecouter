@@ -1,4 +1,4 @@
-name: Construire et signer les extensions (prototype)
+name: Construire les extensions (signature sur demande)
 
 on:
   workflow_dispatch:
@@ -81,14 +81,17 @@ jobs:
           if-no-files-found: error
 
       - name: Préparer la signature Mozilla
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Installer web-ext de Mozilla
+        if: github.event_name == 'workflow_dispatch'
         run: npm install --global web-ext@10
 
       - name: Signer Read Aloud expérimental via Mozilla (distribution privée)
+        if: github.event_name == 'workflow_dispatch'
         env:
           WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
           WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
@@ -102,6 +105,7 @@ jobs:
           web-ext sign --source-dir sources/read-aloud --artifacts-dir dist/signed --channel unlisted
 
       - name: Signer TWP expérimental via Mozilla (distribution privée)
+        if: github.event_name == 'workflow_dispatch'
         env:
           WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
           WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
@@ -114,6 +118,7 @@ jobs:
           web-ext sign --source-dir sources/twp/src --artifacts-dir dist/signed --channel unlisted
 
       - name: Vérifier que Mozilla a produit deux fichiers signés
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           python3 - <<'PY'
@@ -130,6 +135,7 @@ jobs:
           PY
 
       - name: Télécharger les extensions signées depuis GitHub Actions
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: extensions-experimentales-signees-mozilla
