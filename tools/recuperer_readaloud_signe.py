@@ -62,15 +62,17 @@ def main():
     versions = response.get("results", [])
     print(f"Mozilla returned {len(versions)} Read Aloud versions")
     for version in versions[:10]:
+        file = version.get("file") or {}
         print("Version:", version.get("version"), "reviewed:", bool(version.get("reviewed")),
-              "files:", [(f.get("status"), bool(f.get("url")), f.get("is_mozilla_signed_extension")) for f in version.get("files", [])])
+              "file:", {"status": file.get("status"), "url_exists": bool(file.get("url")),
+                        "is_mozilla_signed_extension": file.get("is_mozilla_signed_extension")})
     found = []
     for version in versions:
-        for file in version.get("files", []):
-            # Published/signed private versions have status "public".
-            if file.get("status") != "public" or not file.get("url"):
-                continue
-            found.append((version.get("reviewed") or "", version.get("version") or "", file))
+        file = version.get("file") or {}
+        # Mozilla API v5 exposes a single file object, not a files array.
+        if file.get("status") != "public" or not file.get("url"):
+            continue
+        found.append((version.get("reviewed") or "", version.get("version") or "", file))
     if not found:
         raise RuntimeError("No approved Read Aloud version with a downloadable XPI found on Mozilla")
     found.sort(key=lambda entry: entry[0], reverse=True)
