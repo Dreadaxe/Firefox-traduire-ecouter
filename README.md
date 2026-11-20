@@ -40,6 +40,14 @@ Le workflow utilise les secrets GitHub `AMO_JWT_ISSUER` et `AMO_JWT_SECRET` lors
 - Read Aloud (branche `firefox`) : `8053a39541dc77e4ff7719348c406bad9792175a`
 - TWP (branche `master`) : `50a92116542ab93524594cc210f4bf4e5d86a925`
 
+## Signature TWP indépendante (depuis novembre 2026)
+
+L'ancien workflow soumettait d'abord Read Aloud, puis TWP. Si Mozilla tardait à approuver Read Aloud, TWP **n'était jamais soumis**. Read Aloud a été validé depuis, mais la seconde soumission n'avait pas été lancée.
+
+Le workflow [Soumettre TWP experimental a Mozilla](https://github.com/Dreadaxe/Firefox-traduire-ecouter/actions/workflows/signer-twp.yml) est désormais **indépendant** et ne renvoie pas Read Aloud à Mozilla. Il emploie les mêmes secrets GitHub, vérifie les sources et soumet uniquement TWP à la signature privée.
+
+Si Mozilla approuve avant la limite d'attente de l'outil, un artefact `twp-experimental-signe-mozilla` est publié. Sinon, le journal peut afficher un lien vers la page développeur où récupérer le XPI **une fois approuvé**. Un échec pour délai dépassé ne signifie pas à lui seul un refus de Mozilla. Éviter de relancer plusieurs soumissions sans vérifier le statut de la version existante.
+
 ## Validation nécessaire
 
 Avant toute proposition d'installation, vérifier que l'action GitHub réussit, que les extensions démarrent ensemble, puis que les longues pages sont réellement lues **en français et intégralement** sur le Samsung Galaxy S10e. Les tests automatisés de syntaxe ne garantissent pas ce fonctionnement.
